@@ -1,63 +1,91 @@
-﻿using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
+﻿using System.Text.Json;
+using Azure;
+using Azure.Storage.Blobs;
 
-// Define your source and destination container details
-string storageAccountName = "";
-
-string sourceContainerName = "";
-string sourceSasToken = "";
-
-string destinationContainerName = "";
-string destinationSasToken = "";
-
-// Construct the source and destination container URIs with SAS tokens
-string sourceContainerUri = $"https://{storageAccountName}.blob.core.windows.net/{sourceContainerName}?{sourceSasToken}";
-string destinationContainerUri = $"https://{storageAccountName}.blob.core.windows.net/{destinationContainerName}?{destinationSasToken}";
-
-// Create BlobContainerClients for source and destination
-BlobContainerClient sourceContainerClient = new BlobContainerClient(new Uri(sourceContainerUri));
-BlobContainerClient destinationContainerClient = new BlobContainerClient(new Uri(destinationContainerUri));
-
-try
+class Program
 {
-    // List all blobs in the source container
-    Console.WriteLine($"Listing blobs in source container '{sourceContainerName}':");
-    await foreach (BlobItem blobItem in sourceContainerClient.GetBlobsAsync())
+    static async Task Main(string[] args)
     {
-        // Log the blob name and size
-        Console.WriteLine($"Blob Name: {blobItem.Name}, Size: {blobItem.Properties.ContentLength} bytes");
+        string jsonFilePath = "copycontainer/source_containers.json";
+        string jsonString = await File.ReadAllTextAsync(jsonFilePath);
+        var storageAccount = JsonSerializer.Deserialize<StorageAccount>(jsonString);
 
-        // Get the source blob client
-        BlobClient sourceBlobClient = sourceContainerClient.GetBlobClient(blobItem.Name);
-
-        // Get the destination blob client
-        BlobClient destinationBlobClient = destinationContainerClient.GetBlobClient(blobItem.Name);
-
-        // Copy the blob from the source to the destination
-        Console.WriteLine($"Copying blob '{blobItem.Name}' to destination container...");
-        await destinationBlobClient.StartCopyFromUriAsync(sourceBlobClient.Uri);
-
-        // Wait for the copy operation to complete
-        while (true)
+        if (storageAccount != null)
         {
-            BlobProperties properties = await destinationBlobClient.GetPropertiesAsync();
-            if (properties.CopyStatus != CopyStatus.Pending)
-            {
-                if (properties.CopyStatus == CopyStatus.Success)
-                {
-                    Console.WriteLine($"Blob '{blobItem.Name}' copied successfully.");
-                }
-                else
-                {
-                    Console.WriteLine($"Blob '{blobItem.Name}' copy failed. Status: {properties.CopyStatus}");
-                }
-                break;
-            }
-            await Task.Delay(500); // Wait before checking the status again
+            string destinationContainerName = storageAccount.StorageContainers.DestinationContainerName;
+            string destinationToken = storageAccount.StorageContainers.Token;
+
+            await DeleteDestinationContainerData(destinationContainerName, destinationToken);
+            await CopyBlobs(storageAccount);
         }
     }
+
+    static async Task CopyBlobs(StorageAccount storageAccount)
+    {
+        string destinationContainerName = storageAccount.StorageContainers.DestinationContainerName;
+        string destinationToken = storageAccount.StorageContainers.Token;
+
+        BlobServiceClient destinationServiceClient = new BlobServiceClient(new Uri(destinationContainerName), new AzureSasCredential(destinationToken));
+        BlobContainerClient destinationContainerClient = destinationServiceClient.GetBlobContainerClient(destinationContainerName);
+
+        Console.WriteLine($"Starting copy operation to {destinationContainerName} container...");
+        foreach (var sourceContainer in storageAccount.StorageContainers.SourceContainers)
+        {
+            string sourceContainerName = sourceContainer.SourceContainerName;
+            string sourceToken = sourceContainer.Token;
+
+            BlobServiceClient sourceServiceClient = new BlobServiceClient(new Uri(sourceContainerName), new AzureSasCredential(sourceToken));
+            BlobContainerClient sourceContainerClient = sourceServiceClient.GetBlobContainerClient(sourceContainerName);
+
+            Console.WriteLine($"Copying blobs from {sourceContainerName} to {destinationContainerName} container ({storageAccount.StorageContainers.SourceContainers.IndexOf(sourceContainer) + 1}/{storageAccount.StorageContainers.SourceContainers.Count})...");
+            await foreach (var blobItem in sourceContainerClient.GetBlobsAsync())
+            {
+                string destinationBlobName = storageAccount.StorageContainers.SourceContainers.Count > 1
+                    ? $"{sourceContainerName}/{blobItem.Name}"
+                    : blobItem.Name;
+
+                BlobClient sourceBlobClient = sourceContainerClient.GetBlobClient(blobItem.Name);
+                BlobClient destinationBlobClient = destinationContainerClient.GetBlobClient(destinationBlobName);
+
+                Console.WriteLine($"Copying {blobItem.Name} blob from {sourceContainerName} to {destinationContainerName} container...");
+                if (!await destinationBlobClient.ExistsAsync())
+                {
+                    await destinationBlobClient.StartCopyFromUriAsync(sourceBlobClient.Uri);
+                }
+            }
+        }
+        Console.WriteLine($"Copy operation to {destinationContainerName} container completed successfully.");
+    }
+
+    static async Task DeleteDestinationContainerData(string destinationContainerName, string destinationToken)
+    {
+        BlobServiceClient destinationServiceClient = new BlobServiceClient(new Uri(destinationContainerName), new AzureSasCredential(destinationToken));
+        BlobContainerClient destinationContainerClient = destinationServiceClient.GetBlobContainerClient(destinationContainerName);
+
+        Console.WriteLine($"Deleting data from {destinationContainerName} container...");
+        await foreach (var blobItem in destinationContainerClient.GetBlobsAsync())
+        {
+            BlobClient blobClient = destinationContainerClient.GetBlobClient(blobItem.Name);
+            await blobClient.DeleteIfExistsAsync();
+        }
+        Console.WriteLine($"Data from {destinationContainerName} container deleted successfully.");
+    }
 }
-catch (Exception ex)
+
+public class StorageAccount
 {
-    Console.WriteLine($"Error: {ex.Message}");
+    public StorageContainers StorageContainers { get; set; }
+}
+
+public class StorageContainers
+{
+    public string DestinationContainerName { get; set; }
+    public string Token { get; set; }
+    public List<SourceContainer> SourceContainers { get; set; }
+}
+
+public class SourceContainer
+{
+    public string SourceContainerName { get; set; }
+    public string Token { get; set; }
 }

@@ -1,0 +1,16 @@
+{
+  "StorageAccount": {
+    "StorageAccountName": "account_name",
+    "StorageContainers": {
+      "DestinationContainerName": "destination_container",
+      "Token": "token",
+      "SourceContainers": [
+        {
+          "SourceContainerName": "source_container",
+          "Token": "token"
+        }
+      ]
+    }
+  }
+  
+}

@@ -11,4 +11,10 @@
     <PackageReference Include="Azure.Storage.Blobs" Version="12.23.0" />
   </ItemGroup>
 
+  <ItemGroup>
+	<None Include="source_containers.json">
+		<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	</None>
+  </ItemGroup>
+
 </Project>
