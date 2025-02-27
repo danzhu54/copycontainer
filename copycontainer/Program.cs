@@ -6,17 +6,21 @@ class Program
 {
     static async Task Main(string[] args)
     {
-        string jsonFilePath = "copycontainer/source_containers.json";
+        string jsonFilePath = "source_containers.json";
         string jsonString = await File.ReadAllTextAsync(jsonFilePath);
-        var storageAccount = JsonSerializer.Deserialize<StorageAccount>(jsonString);
+        var storageAccounts = JsonSerializer.Deserialize<StorageAccounts>(jsonString);
 
-        if (storageAccount != null)
+        if (storageAccounts?.StorageAccountList != null)
         {
-            string destinationContainerName = storageAccount.StorageContainers.DestinationContainerName;
-            string destinationToken = storageAccount.StorageContainers.Token;
-
-            await DeleteDestinationContainerData(destinationContainerName, destinationToken);
-            await CopyBlobs(storageAccount);
+            foreach (var storageAccount in storageAccounts.StorageAccountList)
+            {
+                //await DeleteDestinationContainerData(storageAccount);
+                await CopyBlobs(storageAccount);
+            }
+        }
+        else
+        {
+            Console.WriteLine("Invalid JSON structure or missing required fields.");
         }
     }
 
@@ -24,8 +28,9 @@ class Program
     {
         string destinationContainerName = storageAccount.StorageContainers.DestinationContainerName;
         string destinationToken = storageAccount.StorageContainers.Token;
+        string destinationUri = $"https://{storageAccount.StorageAccountName}.blob.core.windows.net/{destinationContainerName}?{destinationToken}";
 
-        BlobServiceClient destinationServiceClient = new BlobServiceClient(new Uri(destinationContainerName), new AzureSasCredential(destinationToken));
+        BlobServiceClient destinationServiceClient = new BlobServiceClient(new Uri(destinationUri));
         BlobContainerClient destinationContainerClient = destinationServiceClient.GetBlobContainerClient(destinationContainerName);
 
         Console.WriteLine($"Starting copy operation to {destinationContainerName} container...");
@@ -33,9 +38,9 @@ class Program
         {
             string sourceContainerName = sourceContainer.SourceContainerName;
             string sourceToken = sourceContainer.Token;
+            string sourceUri = $"https://{storageAccount.StorageAccountName}.blob.core.windows.net/{sourceContainerName}?{sourceToken}";
 
-            BlobServiceClient sourceServiceClient = new BlobServiceClient(new Uri(sourceContainerName), new AzureSasCredential(sourceToken));
-            BlobContainerClient sourceContainerClient = sourceServiceClient.GetBlobContainerClient(sourceContainerName);
+            BlobContainerClient sourceContainerClient = new BlobContainerClient(new Uri(sourceUri));
 
             Console.WriteLine($"Copying blobs from {sourceContainerName} to {destinationContainerName} container ({storageAccount.StorageContainers.SourceContainers.IndexOf(sourceContainer) + 1}/{storageAccount.StorageContainers.SourceContainers.Count})...");
             await foreach (var blobItem in sourceContainerClient.GetBlobsAsync())
@@ -57,9 +62,12 @@ class Program
         Console.WriteLine($"Copy operation to {destinationContainerName} container completed successfully.");
     }
 
-    static async Task DeleteDestinationContainerData(string destinationContainerName, string destinationToken)
+    static async Task DeleteDestinationContainerData(StorageAccount storageAccount)
     {
-        BlobServiceClient destinationServiceClient = new BlobServiceClient(new Uri(destinationContainerName), new AzureSasCredential(destinationToken));
+        string destinationContainerName = storageAccount.StorageContainers.DestinationContainerName;
+        string destinationToken = storageAccount.StorageContainers.Token;
+        string destinationUri = $"https://{storageAccount.StorageAccountName}.blob.core.windows.net/{destinationContainerName}?{destinationToken}";
+        BlobServiceClient destinationServiceClient = new BlobServiceClient(new Uri(destinationUri), new AzureSasCredential(destinationToken));
         BlobContainerClient destinationContainerClient = destinationServiceClient.GetBlobContainerClient(destinationContainerName);
 
         Console.WriteLine($"Deleting data from {destinationContainerName} container...");
@@ -72,9 +80,15 @@ class Program
     }
 }
 
+public class StorageAccounts
+{
+    public List<StorageAccount> StorageAccountList { get; set; }
+}
+
 public class StorageAccount
 {
     public StorageContainers StorageContainers { get; set; }
+    public string StorageAccountName { get; set; }
 }
 
 public class StorageContainers
