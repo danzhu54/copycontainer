@@ -14,7 +14,7 @@ class Program
         {
             foreach (var storageAccount in storageAccounts.StorageAccountList)
             {
-                //await DeleteDestinationContainerData(storageAccount);
+                await DeleteDestinationContainerData(storageAccount);
                 await CopyBlobs(storageAccount);
             }
         }
